@@ -1,0 +1,142 @@
+以下基于操作系统centos7  最小化安装  （以下有错误请联系我，大家共同探讨）
+
+
+查看虚拟机或者cdrom 是否插入光盘并启动了
+mkdir /mnt/iso;echo "/dev/cdrom      /mnt/iso        iso9660         defaults,loop   0 0" >> /etc/fstab;mount -a
+
+rm -rf /etc/yum.repos.d/*
+
+cat >> /etc/yum.repos.d/iso.repo <<EOF
+[iso]
+name=centos7
+baseurl=file:///mnt/iso
+gpgcheck=0
+EOF
+
+yum -y install vim wget net-tools ntp ntpdate
+
+关闭selinux
+sed -i 's/SELINUX=enforcing/SELINUX=disabled/g'  /etc/selinux/config
+
+关闭防火墙
+systemctl stop firewalld.service;firewall-cmd --state
+
+systemctl disable firewalld.service;systemctl list-unit-files|grep firewalld
+
+按照自己的环境修改下面内容
+
+cat >> /etc/hosts << EOF
+172.16.1.61             ceph1           ceph1.storage.com
+172.16.1.62             ceph2           ceph2.storage.com
+172.16.1.63             ceph3           ceph3.storage.com
+172.16.1.64             ceph4           ceph4.storage.com
+EOF
+
+上传Ceph-0.80.10-CentOS7.1-x86_64.iso      到/mnt
+
+mkdir /mnt/ceph;echo "/mnt/Ceph-0.80.10-CentOS7.1-x86_64.iso  /mnt/ceph       iso9660         defaults,loop   0 0"  >> /etc/fstab;mount -a
+
+cat >> /etc/yum.repos.d/ceph.repo <<EFO 
+[Ceph]
+name=Ceph-0.80.10
+baseurl=file:///mnt/ceph
+gpgcheck=0
+EFO
+
+以下两个源需要联网
+wget -O /etc/yum.repos.d/epel.repo http://mirrors.aliyun.com/repo/epel-7.repo（这个源必须有）
+
+wget -O /etc/yum.repos.d/CentOS-Base.repo http://mirrors.aliyun.com/repo/Centos-7.repo(当你本地源找不到软件的情况，需要下载这个源)
+
+
+yum -y clean all;yum --enablerepo=epel clean metadata;yum -y list ceph  (查看是否存在ceph软件包 并检查源是否配置正确)
+
+yum -y install ceph-deploy ceph（管理节点需要安装ceph-deploy,其他节点不需要安装）
+
+配置ssh互信
+生成秘钥
+ssh-keygen
+复制秘钥到每个节点
+ssh-copy-id -i /root/.ssh/id_rsa.pub ceph1
+ssh-copy-id -i /root/.ssh/id_rsa.pub ceph2
+ssh-copy-id -i /root/.ssh/id_rsa.pub ceph3
+ssh-copy-id -i /root/.ssh/id_rsa.pub ceph4
+
+（以上配置每台server都需要配置，成功后可以 关闭系统  shutdown now   并做好快照 描述：ceph基础环境）
+在需要配置为osd节点的server上添加一块硬盘（或者用分区代替也是可以）
+开机启动  
+
+
+配置ceph集群
+我的环境是4台server（最少3台server）
+3个mon
+2个mds
+4个osd
+（最少3个mon，2个mds，3个osd）
+
+在管理节点 执行以下命令
+我的管理节点hostname：ceph1.storage.com
+
+创建集群
+ceph-deploy new ceph1
+
+创建第一个mon（监控）
+ceph-deploy mon create-initial
+
+初始化硬盘（或者分区）
+ceph-deploy disk zap ceph1:/dev/sdb
+
+创建osd
+ceph-deploy osd create ceph1:/dev/sdb
+
+创建mds
+ceph-deploy mds create ceph1
+
+
+添加mon
+ceph-deploy mon add ceph2
+ceph-deploy mon add ceph3
+
+创建osd 
+
+初始化硬盘
+ceph-deploy disk zap ceph2:/dev/sdb
+ceph-deploy disk zap ceph3:/dev/sdb
+ceph-deploy disk zap ceph4:/dev/sdb
+
+创建osd
+ceph-deploy osd create ceph2:/dev/sdb
+ceph-deploy osd create ceph3:/dev/sdb
+ceph-deploy osd create ceph4:/dev/sdb
+
+创建另一个mds
+ceph-deploy mds create ceph3
+
+客户端挂载
+需要在客户端安装
+yum -y install ceph ceph-fuse 
+
+在管理节点操作
+ceph-deploy admin  hostname（hostname 是客户端的）
+
+到客户端操作
+
+mkdir /cephdata
+ceph-fuse -m ceph1,ceph2,ceph3   /cephdata (可以解析到mon节点就使用hostname 没有的话就使用mon节点的IP地址，)
+
+
+
+结束ok
+
+
+
+
+
+
+
+
+
+
+
+
+
